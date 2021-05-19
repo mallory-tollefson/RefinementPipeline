@@ -28,20 +28,6 @@ class PipelineFunction {
      */
     public URL uniprotObj;
     /**
-     * Indicates whether a Protein Model Portal link exists. Important for
-     * downloading structures when there is no ProteinModelPortal link, but
-     * there is a SwissModel link.
-     */
-    public String noProteinModelPortal;
-    /**
-     * Provides Protein Model Portal link for each gene.
-     */
-    public String proteinModelPortal;
-    /**
-     * Stores initial repository links from Protein Model Portal page.
-     */
-    public List<String> proteinModelLinks = new ArrayList<>();
-    /**
      * Stores residue ranges for each structure.
      */
     public List<String> residueList = new ArrayList<>();
@@ -61,6 +47,14 @@ class PipelineFunction {
      * Stores the type of each structure (e.g. monomer, dimer, hexamer).
      */
     public List<String> structureTypes = new ArrayList<>();
+    /**
+     * Stores the direct SwissModel download link for each structure.
+     */
+    public List<String> swissModelLinks = new ArrayList<>();
+    /**
+     * Stores the direct ModBase download link for each structure.
+     */
+    public List<String> modBaseLinks = new ArrayList<>();
 
     /**
      * Checks against the DVD Github for structures that have already been
@@ -214,33 +208,119 @@ class PipelineFunction {
      * @throws MalformedURLException
      * @throws IOException
      */
-    public void getNoProteinModelPortal(String entryID) throws MalformedURLException, IOException {
+     public void getDownloadLinks() throws MalformedURLException, IOException {
 
-        BufferedReader br5 = new BufferedReader(new InputStreamReader(uniprotObj.openStream()));
+        BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(uniprotObj.openStream()));
 
-        String line2;
+        String line;
         /**
          * While loop tells BufferedReader to read in lines from the source
          * until there is nothing left to read.
          */
-        while ((line2 = br5.readLine()) != null) {
-            if (line2.contains("ProteinModelPortal")) {
-                /*
-                String[] proteinModelSplit = line2.split("/uniprot/");
-                String firstProteinModel = proteinModelSplit[1];
-                String[] proteinModelSplit2 = firstProteinModel.split("\" onclick=");
-                proteinModelPortal = proteinModelSplit2[0];
-                 */
-                proteinModelPortal = entryID;
+        while ((line = bufferedReader.readLine()) != null) {
+            String swissModelLink;
+            String modBaseLink;
+            if (line.contains("3D structure databases") && line.contains("swissmodel.expasy.org/interactive") && line.contains("modbase-cgi")) {
+                String[] split1 = line.split("3D structure databases");
+                String[] split2 = split1[1].split("</td><td><a href=\"");
+                modBaseLink = split2[1].split("\">")[0];
+                modBaseLinks.add(modBaseLink);
                 break;
-            } else if (line2.contains("tertiary") && line2.contains("swissmodel") && !line2.contains("ProteinModelPortal")) {
-                String[] smrSplit = line2.split("</td><td><a href=\"");
-                String firstSMR = smrSplit[1];
-                String[] smrSplit2 = firstSMR.split("\">");
-                noProteinModelPortal = smrSplit2[0];
+            } else if (line.contains("3D structure databases") && line.contains("swissmodel.expasy.org/repository") && line.contains("modbase-cgi")) {
+                String[] split1 = line.split("3D structure databases");
+                String[] split2 = split1[1].split("</td><td><a href=\"");
+                swissModelLink = split2[1].split("\">")[0];
+                modBaseLink = split2[2].split("\">")[0];
+                swissModelLinks.add(swissModelLink);
+                modBaseLinks.add(modBaseLink);
+                break;
+            } else if (line.contains("swissmodel.expasy.org/repository") && !line.contains("modbase-cgi")) {
+                System.out.println("Swiss model link exists but no modbase link exists.");
+                break;
+            } else if (line.contains("modbase-cgi") && !line.contains("swissmodel.expasy.org/repository")) {
+                System.out.println("Modbase link exists but no swiss model link exists.");
                 break;
             }
         }
+
+        bufferedReader.close();
+    }
+
+    /**
+     * For one gene, this method gets the total sequence length along with all models available in the Swiss Model
+     * Repository and their model type (experimental, homology), their state (monomer, dimer, etc.), their isoform,
+     * their sequence identity if from a homology model, model length, and residue range.
+     * @throws MalformedURLException
+     * @throws IOException
+     */
+    public void getSwissModelInfo() throws MalformedURLException, IOException {
+        if(swissModelLinks.isEmpty()) {
+            return;
+        }
+
+        URL swissModelURL = new URL(swissModelLinks.get(0));
+        BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(swissModelURL.openStream()));
+
+        String line;
+        while ((line = bufferedReader.readLine()) != null){
+            if (line.contains(" aa;")) {
+                String[] split1 = line.split(" aa;");
+                String proteinLength = split1[0];
+                System.out.println("Protein Length: " + proteinLength);
+            }
+            //Gather information on experimental models.
+            if (line.contains(".pdb") && line.contains("href") && line.contains("rcsb.org")){
+                String[] split1 = line.split(" href=\"");
+                String[] split2 = split1[1].split("\" target=");
+                        String pdbLink = split2[0];
+                System.out.println("PDB LINK: " + pdbLink);
+                if (line.contains("Range: ")){
+                    String[] newSplit1 = line.split("Range: ");
+                    String[] newSplit2 = newSplit1[1].split("\"></div></td>");
+                    String[] newSplit3 = newSplit2[0].split("-");
+                    String startRes = newSplit3[0];
+                    String endRes = newSplit3[1];
+                    int range = Integer.parseInt(endRes) - Integer.parseInt(startRes) + 1;
+                    System.out.println("Starting residue: " + startRes);
+                    System.out.println("Ending residue: " + endRes);
+                    System.out.println("Range is: " + range);
+                }
+            }
+
+            //Gather information on homology models.
+            if (line.contains(".pdb") && line.contains("href") && !line.contains("rcsb.org")){
+                String[] split1 = line.split(" href=\"");
+                String[] split2 = split1[1].split("\" target=");
+                String pdbLink = "https://swissmodel.expasy.org"+split2[0];
+                System.out.println("PDB LINK: " + pdbLink);
+
+                String[] splitID = line.split("></div></td><td>");
+                String[] splitID2 = splitID[1].split("</td></tr><tr");
+                String seqid = splitID2[0];
+                System.out.println("Sequence Identity: " + seqid);
+            }
+            if (line.contains("menuitem")){
+                String[] split = line.split("Isoform ");
+                String[] split2 = split[1].split("</a></td><td>");
+                String isoformNum = split2[0];
+                //String[] split3 = split2[1].split("</td><td>");
+                //String structureType = split3[0];
+                System.out.println("Isoform Number: " + isoformNum);
+                //System.out.println("Structure Type: " + structureType);
+
+                String[] newSplit1 = line.split("display:none\">");
+                String[] newSplit2 = newSplit1[1].split("-");
+                String startRes = newSplit2[0];
+                String[] newSplit3 = newSplit2[1].split("</span><div");
+                String endRes = newSplit3[0];
+                int range = Integer.parseInt(endRes) - Integer.parseInt(startRes) + 1;
+                System.out.println("Starting residue: " + startRes);
+                System.out.println("Ending residue: " + endRes);
+                System.out.println("Range is: " + range);
+            }
+        }
+
+        bufferedReader.close();
     }
 
     /**
@@ -250,16 +330,14 @@ class PipelineFunction {
      * @throws MalformedURLException
      * @throws IOException
      */
-    public void getProteinModelLinks() throws MalformedURLException, IOException {
+    /*public void getProteinModelLinks() throws MalformedURLException, IOException {
 
         URL proteinModelObj = new URL("https://www.proteinmodelportal.org/query/uniprot/" + proteinModelPortal);
 
         BufferedReader br6 = new BufferedReader(new InputStreamReader(proteinModelObj.openStream()));
 
-        /**
-         * Finds model links on the ProteinModelPortal website and adds them to
-         * an ArrayList.
-         */
+         //Finds model links on the ProteinModelPortal website and adds them to
+         //an ArrayList.
         String line3;
         String modbase = null;
         String swissmodel = null;
@@ -281,12 +359,10 @@ class PipelineFunction {
             }
         }
 
-        /**
-         * Takes all SwissModel links from the list and moves them to a new list
-         * for deletion.
-         */
+         //Takes all SwissModel links from the list and moves them to a new list
+         //for deletion.
         List<String> swissModelLinks = new ArrayList<>();
-        for (Iterator<String> iter = proteinModelLinks.listIterator(); iter.hasNext();) {
+        for (Iterator<String> iter = proteinModelLinks.listIterator(); iter.hasNext(); ) {
             String a = iter.next();
             if (a.contains("SWISSMODEL")) {
                 swissModelLinks.add(a);
@@ -294,16 +370,16 @@ class PipelineFunction {
             }
         }
 
-        /**
-         * Deletes all SwissModel links except for one and adds the one link
-         * back to the original list. This eliminates redundancy and saves time
-         * (since every SwissModel link redirects to the same site).
-         */
+
+         //Deletes all SwissModel links except for one and adds the one link
+         //back to the original list. This eliminates redundancy and saves time
+         //(since every SwissModel link redirects to the same site).
         if (swissModelLinks.size() > 0) {
             swissModelLinks.subList(1, swissModelLinks.size()).clear();
             proteinModelLinks.add(swissModelLinks.get(0));
+            System.out.println("swissModelLink: " + swissModelLinks.get(0));
         }
-    }
+    } */
 
     /**
      * Constructs lists that contain the download link, residue range, sequence
@@ -314,348 +390,68 @@ class PipelineFunction {
      * @throws MalformedURLException
      * @throws IOException
      */
-    public void buildLists() throws MalformedURLException, IOException {
+    /*public void getInfo() throws MalformedURLException, IOException {
 
-        if (noProteinModelPortal != null) {
-            proteinModelLinks.add("this is a placeholder for when no Protein Model Portal link is provided but there is a Swissmodel link");
+        URL swissModelURL = new URL(swissModelLinks.get(0));
+        BufferedReader br7 = new BufferedReader(new InputStreamReader(swissModelURL.openStream()));
+
+        String line;
+        while ((line = br7.readLine()) != null){
+            if (line.contains(" aa;")) {
+                String[] split1 = line.split(" aa;");
+                String proteinLength = split1[0];
+                System.out.println("Protein Length: " + proteinLength);
+            }
         }
 
-        /**
-         * Loops through each model link (usually, one ModBase and one
-         * SwissModel).
-         */
-        for (int x = 0; x < proteinModelLinks.size(); x++) {
 
-            String modelDetails = "https://www.proteinmodelportal.org/?pid=modelDetail&provider=" + proteinModelLinks.get(x);
-            URL modelObj = new URL(modelDetails);
 
-            BufferedReader br7 = new BufferedReader(new InputStreamReader(modelObj.openStream()));
-
-            /**
-             * Locates source code for the "Model Information" page embedded
-             * within the "Model Details" page.
-             */
-            String line4;
-            String detail = null;
-            while ((line4 = br7.readLine()) != null) {
-                if (line4.contains("Loading Model Detail Information")) {
-                    String[] detailSplit = line4.split("pmpuid=");
-                    String firstDetail = detailSplit[1];
-                    String[] detailSplit2 = firstDetail.split("\", \"");
-                    detail = detailSplit2[0];
-                    break;
-                }
+         //Locates source code for the "Model Information" page embedded
+         //within the "Model Details" page.
+        String line4;
+        String detail = null;
+        while ((line4 = br7.readLine()) != null) {
+            if (line4.contains("Loading Model Detail Information")) {
+                String[] detailSplit = line4.split("pmpuid=");
+                String firstDetail = detailSplit[1];
+                String[] detailSplit2 = firstDetail.split("\", \"");
+                detail = detailSplit2[0];
+                break;
             }
+        }
 
-            String modelInfo = "https://www.proteinmodelportal.org/?pid=asyncData&vid=structure&pmpuid=" + detail;
-            URL infoObj = new URL(modelInfo);
+        String modelInfo = "https://www.proteinmodelportal.org/?pid=asyncData&vid=structure&pmpuid=" + detail;
+        URL infoObj = new URL(modelInfo);
 
-            /**
-             * finds link to ModBase/SwissModel page from the model information
-             * source code and stores it as the String variable "pageSource".
-             */
-            BufferedReader br8 = new BufferedReader(new InputStreamReader(infoObj.openStream()));
-            String line5;
-            String info = null;
-            while ((line5 = br8.readLine()) != null) {
-                if (line5.contains("img id")) {
-                    String[] infoSplit = line5.split("href=\"");
-                    String firstInfo = infoSplit[1];
-                    String[] infoSplit2 = firstInfo.split("\" class");
-                    info = infoSplit2[0];
-                    break;
-                }
+         //finds link to ModBase/SwissModel page from the model information
+         //source code and stores it as the String variable "pageSource".
+        BufferedReader br8 = new BufferedReader(new InputStreamReader(infoObj.openStream()));
+        String line5;
+        String info = null;
+        while ((line5 = br8.readLine()) != null) {
+            if (line5.contains("img id")) {
+                String[] infoSplit = line5.split("href=\"");
+                String firstInfo = infoSplit[1];
+                String[] infoSplit2 = firstInfo.split("\" class");
+                info = infoSplit2[0];
+                break;
             }
+        }
 
-            String pageSource = info;
+        String pageSource = info;
 
-            if (noProteinModelPortal != null) {
-                pageSource = noProteinModelPortal;
-            }
+        if (noProteinModelPortal != null) {
+            pageSource = noProteinModelPortal;
+        }
 
-            /**
-             * This if statement sorts the links between SwissModel and ModBase.
-             */
-            if (pageSource.contains("swissmodel")) {
+         //This if statement sorts the links between SwissModel and ModBase.
+        if (pageSource.contains("swissmodel")) {
 
-                /**
-                 * Fixes any issues with redirects.
-                 */
-                URL fixRedirect = new URL(pageSource);
-                String newUrl = null;
+             // Fixes any issues with redirects.
+            URL fixRedirect = new URL(pageSource);
+            String newUrl = null;
 
-                if (!pageSource.contains("https")) {
-                    try {
-                        HttpURLConnection conn = (HttpURLConnection) fixRedirect.openConnection();
-                        conn.setReadTimeout(5000);
-                        conn.addRequestProperty("Accept-Language", "en-US,en;q=0.8");
-                        conn.addRequestProperty("User-Agent", "Mozilla");
-                        conn.addRequestProperty("Referer", "google.com");
-
-                        boolean redirect = false;
-
-                        int status = conn.getResponseCode();
-                        if (status != HttpURLConnection.HTTP_OK) {
-                            if (status == HttpURLConnection.HTTP_MOVED_TEMP || status == HttpURLConnection.HTTP_MOVED_PERM || status == HttpURLConnection.HTTP_SEE_OTHER) {
-                                redirect = true;
-                            }
-                        }
-
-                        if (redirect) {
-
-                            newUrl = conn.getHeaderField("Location");
-
-                            String cookies = conn.getHeaderField("Set-Cookie");
-
-                            conn = (HttpURLConnection) new URL(newUrl).openConnection();
-                            conn.setRequestProperty("Cookie", cookies);
-                            conn.addRequestProperty("Accept-Language", "en-US,en;q=0.8");
-                            conn.addRequestProperty("User-Agent", "Mozilla");
-                            conn.addRequestProperty("Referer", "google.com");
-                        }
-
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-
-                    pageSource = newUrl;
-                }
-
-                URL pageObj = new URL(pageSource);
-
-                BufferedReader br2 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
-
-                /**
-                 * Locates every PDB download link under "Homology Models" on
-                 * SwissModel and stores them in pdbLinks.
-                 */
-                String line1;
-                while ((line1 = br2.readLine()) != null) {
-                    if (line1.contains(">Homology models<")) {
-                        line1 = br2.readLine();
-                        while (!(line1 = br2.readLine()).contains("tabindex") && !line1.contains("smrSuggest")) {
-                            if (line1.contains("repository")) {
-                                String[] linkSplit = line1.split("href=\"");
-                                String firstLink = linkSplit[2];
-                                if (firstLink.contains(".pdb")) {
-                                    String[] linkSplit2 = firstLink.split("\" target=");
-                                    String link = linkSplit2[0];
-                                    pdbLinks.add(link);
-                                } else {
-                                    linkSplit = line1.split("href=\"");
-                                    firstLink = linkSplit[1];
-                                    String[] linkSplit2 = firstLink.split("\" target=");
-                                    String link = linkSplit2[0];
-                                    pdbLinks.add(link);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                BufferedReader br4 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
-
-                /**
-                 * Finds the structure type, residue range, sequence identity,
-                 * and full protein length from the SwissModel website and
-                 * stores them in structureTypes, residueList, seqList, and
-                 * proteinLengths. The index for each PDB link should correspond
-                 * to the index for each structure type, residue range, etc.
-                 */
-                String line;
-                String residueString = null;
-                Double seqId = null;
-                String lengthString = null;
-                while ((line = br4.readLine()) != null) {
-                    if (line.contains(">Homology models<")) {
-                        if (line.contains("monomer")) {
-                            structureTypes.add("");
-                        } else if (line.contains("homo-2-mer")) {
-                            structureTypes.add("-Dimer");
-                        } else if (line.contains("homo-3-mer")) {
-                            structureTypes.add("-Trimer");
-                        } else if (line.contains("homo-4-mer")) {
-                            structureTypes.add("-Tetramer");
-                        } else if (line.contains("homo-5-mer")) {
-                            structureTypes.add("-Pentamer");
-                        } else if (line.contains("homo-6-mer")) {
-                            structureTypes.add("-Hexamer");
-                        } else if (line.contains("homo-12-mer")) {
-                            structureTypes.add("-12-mer");
-                        } else if (line.contains("mer<")) {
-                            structureTypes.add("-Heteromer");
-                        }
-                        /**
-                         * The keyword is "tabindex" if the Homology Models on
-                         * SwissModel are followed by Homology Models Built on
-                         * Isoform Sequence and the keyword is "smrSuggest" if
-                         * there are no structures listed after the Homology
-                         * Models.
-                         */
-                        while (!(line = br4.readLine()).contains("tabindex") && !line.contains("smrSuggest")) {
-                            if (line.contains("monomer")) {
-                                structureTypes.add("");
-                            } else if (line.contains("homo-2-mer")) {
-                                structureTypes.add("-Dimer");
-                            } else if (line.contains("homo-3-mer")) {
-                                structureTypes.add("-Trimer");
-                            } else if (line.contains("homo-4-mer")) {
-                                structureTypes.add("-Tetramer");
-                            } else if (line.contains("homo-5-mer")) {
-                                structureTypes.add("-Pentamer");
-                            } else if (line.contains("homo-6-mer")) {
-                                structureTypes.add("-Hexamer");
-                            } else if (line.contains("homo-12-mer")) {
-                                structureTypes.add("-12-mer");
-                            } else if (line.contains("mer<")) {
-                                structureTypes.add("-Heteromer");
-                            }
-                            if (line.contains("seqLength=\"")) {
-                                String[] firstSplit = line.split("seqLength=\"");
-                                String secondHalf = firstSplit[1];
-                                String[] secondSplit = secondHalf.split("\"");
-                                lengthString = secondSplit[0];
-                                proteinLengths.add(lengthString);
-                            }
-                            if (line.contains("display:none\">")) {
-                                String[] firstSplit = line.split("display:none\">");
-                                String secondHalf = firstSplit[1];
-                                String[] secondSplit = secondHalf.split("</span>");
-                                residueString = secondSplit[0];
-                                residueList.add(residueString);
-                            }
-                            if (line.contains("Range:")) {
-                                String[] seqSplit = line.split("</div></td><td>");
-                                String firstSeq = seqSplit[1];
-                                String[] seqSplit2 = firstSeq.split("</td><td class");
-                                String seqString = seqSplit2[0];
-                                seqId = Double.parseDouble(seqString);
-                                seqList.add(seqId);
-                            }
-                        }
-                    }
-                }
-
-                if (getExperimental.contains(gene)) {
-                    System.out.println("Downloading experimental structures for " + gene);
-                    //grab the link for the experimental structure, add to pdbLinks list
-                    //include filler data for the sequence identity
-                    BufferedReader br3 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
-
-                    /**
-                     * Locates every PDB download link under "Homology Models"
-                     * on SwissModel and stores them in pdbLinks.
-                     */
-                    String line2;
-                    while ((line2 = br3.readLine()) != null) {
-                        if (line2.contains(">Experimental structures<")) {
-                            line2 = br3.readLine();
-                            while (!(line2 = br3.readLine()).contains("tabindex") && !line2.contains("smrSuggest")) {
-                                if (line2.contains("repository")) {
-                                    String[] linkSplit = line2.split("href=\"");
-                                    String firstLink = linkSplit[1];
-                                    if (firstLink.contains(".pdb")) {
-                                        String[] linkSplit2 = firstLink.split("\" target=");
-                                        String link = linkSplit2[0];
-                                        pdbLinks.add(link);
-                                    } else {
-                                        linkSplit = line2.split("href=\"");
-                                        firstLink = linkSplit[1];
-                                        String[] linkSplit2 = firstLink.split("\" target=");
-                                        String link = linkSplit2[0];
-                                        pdbLinks.add(link);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    BufferedReader br5 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
-
-                    /**
-                     * Finds the structure type, residue range, sequence
-                     * identity, and full protein length from the SwissModel
-                     * website and stores them in structureTypes, residueList,
-                     * seqList, and proteinLengths. The index for each PDB link
-                     * should correspond to the index for each structure type,
-                     * residue range, etc.
-                     */
-                    String line3;
-                    String residueString1 = null;
-                    Double seqId1 = null;
-                    String lengthString1 = null;
-                    while ((line3 = br5.readLine()) != null) {
-                        if (line3.contains(">Experimental structures<")) {
-                            if (line3.contains("monomer")) {
-                                structureTypes.add("-expt");
-                            } else if (line3.contains("homo-2-mer")) {
-                                structureTypes.add("-Dimer-expt");
-                            } else if (line3.contains("homo-3-mer")) {
-                                structureTypes.add("-Trimer-expt");
-                            } else if (line3.contains("homo-4-mer")) {
-                                structureTypes.add("-Tetramer-expt");
-                            } else if (line3.contains("homo-5-mer")) {
-                                structureTypes.add("-Pentamer-expt");
-                            } else if (line3.contains("homo-6-mer")) {
-                                structureTypes.add("-Hexamer-expt");
-                            } else if (line3.contains("homo-12-mer")) {
-                                structureTypes.add("-12-mer-expt");
-                            } else if (line3.contains("mer<")) {
-                                structureTypes.add("-Heteromer-expt");
-                            }
-                            /**
-                             * The keyword is "tabindex" if the Homology Models
-                             * on SwissModel are followed by Homology Models
-                             * Built on Isoform Sequence and the keyword is
-                             * "smrSuggest" if there are no structures listed
-                             * after the Homology Models.
-                             */
-                            while (!(line3 = br5.readLine()).contains("tabindex") && !line3.contains("smrSuggest")) {
-                                if (line3.contains("monomer")) {
-                                    structureTypes.add("-expt");
-                                } else if (line3.contains("homo-2-mer")) {
-                                    structureTypes.add("-Dimer-expt");
-                                } else if (line3.contains("homo-3-mer")) {
-                                    structureTypes.add("-Trimer-expt");
-                                } else if (line3.contains("homo-4-mer")) {
-                                    structureTypes.add("-Tetramer-expt");
-                                } else if (line3.contains("homo-5-mer")) {
-                                    structureTypes.add("-Pentamer-expt");
-                                } else if (line3.contains("homo-6-mer")) {
-                                    structureTypes.add("-Hexamer-expt");
-                                } else if (line3.contains("homo-12-mer")) {
-                                    structureTypes.add("-12-mer-expt");
-                                } else if (line3.contains("mer<")) {
-                                    structureTypes.add("-Heteromer-expt");
-                                }
-                                if (line3.contains("seqLength=\"")) {
-                                    String[] firstSplit = line3.split("seqLength=\"");
-                                    String secondHalf = firstSplit[1];
-                                    String[] secondSplit = secondHalf.split("\"");
-                                    lengthString1 = secondSplit[0];
-                                    proteinLengths.add(lengthString1);
-                                }
-                                if (line3.contains("display:none\">")) {
-                                    String[] firstSplit = line3.split("display:none\">");
-                                    String secondHalf = firstSplit[1];
-                                    String[] secondSplit = secondHalf.split("</span>");
-                                    residueString1 = secondSplit[0];
-                                    residueList.add(residueString1);
-                                }
-                                if (line3.contains("Range:")) {
-                                    seqId1 = 0.0; //Experimental structures don't have a sequence identity, 0.0 is used as a placeholder
-                                    seqList.add(seqId1);
-                                }
-                            }
-                        }
-                    }
-                }
-
-            } else if (pageSource.contains("modbase")) {
-
-                URL fixRedirect = new URL(pageSource);
-                String newUrl = null;
-
+            if (!pageSource.contains("https")) {
                 try {
                     HttpURLConnection conn = (HttpURLConnection) fixRedirect.openConnection();
                     conn.setReadTimeout(5000);
@@ -690,60 +486,236 @@ class PipelineFunction {
                 }
 
                 pageSource = newUrl;
-                pdbLinks.add(pageSource);
+            }
 
-                URL pageObj = new URL(pageSource);
+            URL pageObj = new URL(pageSource);
 
-                BufferedReader br4 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
+            BufferedReader br2 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
 
-                /**
-                 * Finds and stores the residue range and sequence identity from
-                 * the ModBase website.
-                 */
-                String line;
-                Double seqId = null;
-                String residueRange = null;
-                while ((line = br4.readLine()) != null) {
-                    if (line.contains("Sequence Length</th> <td>")) {
-                        String[] firstSplit = line.split("Sequence Length</th> <td>");
-                        String secondHalf = firstSplit[1];
-                        String[] secondSplit = secondHalf.split("</td></tr></table>");
-                        String lengthString = secondSplit[0];
-                        proteinLengths.add(lengthString);
-                    }
-                    if (line.contains("Sequence Identity</th><td><font color=")) {
-                        String[] seqSplit = line.split("Sequence Identity</th><td><font color=");
-                        String firstSeq = seqSplit[1];
-                        String[] seqSplit2 = firstSeq.split("%</font>");
-                        String secondSeq = seqSplit2[0];
-                        String[] seqSplit3 = secondSeq.split(">");
-                        String seqString = seqSplit3[1];
-                        seqId = Double.parseDouble(seqString);
-                        seqList.add(seqId);
-                        structureTypes.add("");
-                    }
-                    if (line.contains("considered")) {
-                        String[] firstSplit = line.split("Target Region</th><td>");
-                        String secondHalf = firstSplit[1];
-                        String[] secondSplit = secondHalf.split(" </td></tr><tr><th><a");
-                        residueRange = secondSplit[0];
-                        residueList.add(residueRange);
+             //Locates every PDB download link under "Homology Models" on
+             //SwissModel and stores them in pdbLinks.
+            String line1;
+            while ((line1 = br2.readLine()) != null) {
+                if (line1.contains(">Homology models<")) {
+                    line1 = br2.readLine();
+                    while (!(line1 = br2.readLine()).contains("tabindex") && !line1.contains("smrSuggest")) {
+                        if (line1.contains("repository")) {
+                            String[] linkSplit = line1.split("href=\"");
+                            String firstLink = linkSplit[2];
+                            if (firstLink.contains(".pdb")) {
+                                String[] linkSplit2 = firstLink.split("\" target=");
+                                String link = linkSplit2[0];
+                                pdbLinks.add(link);
+                            } else {
+                                linkSplit = line1.split("href=\"");
+                                firstLink = linkSplit[1];
+                                String[] linkSplit2 = firstLink.split("\" target=");
+                                String link = linkSplit2[0];
+                                pdbLinks.add(link);
+                            }
+                        }
                     }
                 }
             }
+
+            BufferedReader br4 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
+
+             //Finds the structure type, residue range, sequence identity,
+             //and full protein length from the SwissModel website and
+             //stores them in structureTypes, residueList, seqList, and
+             //proteinLengths. The index for each PDB link should correspond
+             //to the index for each structure type, residue range, etc.
+            String line;
+            String residueString = null;
+            Double seqId = null;
+            String lengthString = null;
+            while ((line = br4.readLine()) != null) {
+                if (line.contains(">Homology models<")) {
+                    if (line.contains("monomer")) {
+                        structureTypes.add("");
+                    } else if (line.contains("homo-2-mer")) {
+                        structureTypes.add("-Dimer");
+                    } else if (line.contains("homo-3-mer")) {
+                        structureTypes.add("-Trimer");
+                    } else if (line.contains("homo-4-mer")) {
+                        structureTypes.add("-Tetramer");
+                    } else if (line.contains("homo-5-mer")) {
+                        structureTypes.add("-Pentamer");
+                    } else if (line.contains("homo-6-mer")) {
+                        structureTypes.add("-Hexamer");
+                    } else if (line.contains("homo-12-mer")) {
+                        structureTypes.add("-12-mer");
+                    } else if (line.contains("mer<")) {
+                        structureTypes.add("-Heteromer");
+                    }
+                     //The keyword is "tabindex" if the Homology Models on
+                     //SwissModel are followed by Homology Models Built on
+                     //Isoform Sequence and the keyword is "smrSuggest" if
+                     //there are no structures listed after the Homology
+                     //Models.
+                    while (!(line = br4.readLine()).contains("tabindex") && !line.contains("smrSuggest")) {
+                        if (line.contains("monomer")) {
+                            structureTypes.add("");
+                        } else if (line.contains("homo-2-mer")) {
+                            structureTypes.add("-Dimer");
+                        } else if (line.contains("homo-3-mer")) {
+                            structureTypes.add("-Trimer");
+                        } else if (line.contains("homo-4-mer")) {
+                            structureTypes.add("-Tetramer");
+                        } else if (line.contains("homo-5-mer")) {
+                            structureTypes.add("-Pentamer");
+                        } else if (line.contains("homo-6-mer")) {
+                            structureTypes.add("-Hexamer");
+                        } else if (line.contains("homo-12-mer")) {
+                            structureTypes.add("-12-mer");
+                        } else if (line.contains("mer<")) {
+                            structureTypes.add("-Heteromer");
+                        }
+                        if (line.contains("seqLength=\"")) {
+                            String[] firstSplit = line.split("seqLength=\"");
+                            String secondHalf = firstSplit[1];
+                            String[] secondSplit = secondHalf.split("\"");
+                            lengthString = secondSplit[0];
+                            proteinLengths.add(lengthString);
+                        }
+                        if (line.contains("display:none\">")) {
+                            String[] firstSplit = line.split("display:none\">");
+                            String secondHalf = firstSplit[1];
+                            String[] secondSplit = secondHalf.split("</span>");
+                            residueString = secondSplit[0];
+                            residueList.add(residueString);
+                        }
+                        if (line.contains("Range:")) {
+                            String[] seqSplit = line.split("</div></td><td>");
+                            String firstSeq = seqSplit[1];
+                            String[] seqSplit2 = firstSeq.split("</td><td class");
+                            String seqString = seqSplit2[0];
+                            seqId = Double.parseDouble(seqString);
+                            seqList.add(seqId);
+                        }
+                    }
+                }
+            }
+
+            if (getExperimental.contains(gene)) {
+                System.out.println("Downloading experimental structures for " + gene);
+                //grab the link for the experimental structure, add to pdbLinks list
+                //include filler data for the sequence identity
+                BufferedReader br3 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
+
+                 //Locates every PDB download link under "Homology Models"
+                 //on SwissModel and stores them in pdbLinks.
+                String line2;
+                while ((line2 = br3.readLine()) != null) {
+                    if (line2.contains(">Experimental structures<")) {
+                        line2 = br3.readLine();
+                        while (!(line2 = br3.readLine()).contains("tabindex") && !line2.contains("smrSuggest")) {
+                            if (line2.contains("repository")) {
+                                String[] linkSplit = line2.split("href=\"");
+                                String firstLink = linkSplit[1];
+                                if (firstLink.contains(".pdb")) {
+                                    String[] linkSplit2 = firstLink.split("\" target=");
+                                    String link = linkSplit2[0];
+                                    pdbLinks.add(link);
+                                } else {
+                                    linkSplit = line2.split("href=\"");
+                                    firstLink = linkSplit[1];
+                                    String[] linkSplit2 = firstLink.split("\" target=");
+                                    String link = linkSplit2[0];
+                                    pdbLinks.add(link);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                BufferedReader br5 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
+
+                 //Finds the structure type, residue range, sequence
+                 //identity, and full protein length from the SwissModel
+                 //website and stores them in structureTypes, residueList,
+                 //seqList, and proteinLengths. The index for each PDB link
+                 //should correspond to the index for each structure type,
+                 //residue range, etc.
+                String line3;
+                String residueString1 = null;
+                Double seqId1 = null;
+                String lengthString1 = null;
+                while ((line3 = br5.readLine()) != null) {
+                    if (line3.contains(">Experimental structures<")) {
+                        if (line3.contains("monomer")) {
+                            structureTypes.add("-expt");
+                        } else if (line3.contains("homo-2-mer")) {
+                            structureTypes.add("-Dimer-expt");
+                        } else if (line3.contains("homo-3-mer")) {
+                            structureTypes.add("-Trimer-expt");
+                        } else if (line3.contains("homo-4-mer")) {
+                            structureTypes.add("-Tetramer-expt");
+                        } else if (line3.contains("homo-5-mer")) {
+                            structureTypes.add("-Pentamer-expt");
+                        } else if (line3.contains("homo-6-mer")) {
+                            structureTypes.add("-Hexamer-expt");
+                        } else if (line3.contains("homo-12-mer")) {
+                            structureTypes.add("-12-mer-expt");
+                        } else if (line3.contains("mer<")) {
+                            structureTypes.add("-Heteromer-expt");
+                        }
+                         //The keyword is "tabindex" if the Homology Models
+                        //on SwissModel are followed by Homology Models
+                         // Built on Isoform Sequence and the keyword is
+                         //"smrSuggest" if there are no structures listed
+                         //after the Homology Models.
+                        while (!(line3 = br5.readLine()).contains("tabindex") && !line3.contains("smrSuggest")) {
+                            if (line3.contains("monomer")) {
+                                structureTypes.add("-expt");
+                            } else if (line3.contains("homo-2-mer")) {
+                                structureTypes.add("-Dimer-expt");
+                            } else if (line3.contains("homo-3-mer")) {
+                                structureTypes.add("-Trimer-expt");
+                            } else if (line3.contains("homo-4-mer")) {
+                                structureTypes.add("-Tetramer-expt");
+                            } else if (line3.contains("homo-5-mer")) {
+                                structureTypes.add("-Pentamer-expt");
+                            } else if (line3.contains("homo-6-mer")) {
+                                structureTypes.add("-Hexamer-expt");
+                            } else if (line3.contains("homo-12-mer")) {
+                                structureTypes.add("-12-mer-expt");
+                            } else if (line3.contains("mer<")) {
+                                structureTypes.add("-Heteromer-expt");
+                            }
+                            if (line3.contains("seqLength=\"")) {
+                                String[] firstSplit = line3.split("seqLength=\"");
+                                String secondHalf = firstSplit[1];
+                                String[] secondSplit = secondHalf.split("\"");
+                                lengthString1 = secondSplit[0];
+                                proteinLengths.add(lengthString1);
+                            }
+                            if (line3.contains("display:none\">")) {
+                                String[] firstSplit = line3.split("display:none\">");
+                                String secondHalf = firstSplit[1];
+                                String[] secondSplit = secondHalf.split("</span>");
+                                residueString1 = secondSplit[0];
+                                residueList.add(residueString1);
+                            }
+                            if (line3.contains("Range:")) {
+                                seqId1 = 0.0; //Experimental structures don't have a sequence identity, 0.0 is used as a placeholder
+                                seqList.add(seqId1);
+                            }
+                        }
+                    }
+                }
+            }
+
         }
 
-        /**
-         * If there are two PDB download links that correspond to the same
-         * residue range, then one of the PDB links is deleted based on which
-         * PDB has the higher sequence identity. The list deleteInt is a list of
-         * integers that correspond to the index of the PDB download link that
-         * is to be deleted.
-         */
+
+         //If there are two PDB download links that correspond to the same
+         //residue range, then one of the PDB links is deleted based on which
+         //PDB has the higher sequence identity. The list deleteInt is a list of
+         //integers that correspond to the index of the PDB download link that
+         //is to be deleted.
         List<Integer> deleteInt = new ArrayList<>();
-        /**
-         * Nested for loops check for duplicates within residueList.
-         */
+         //Nested for loops check for duplicates within residueList.
         for (int j = 0; j < residueList.size(); j++) {
             for (int k = j + 1; k < residueList.size(); k++) {
                 if (residueList.get(j).equals(residueList.get(k)) && structureTypes.get(j).equals(structureTypes.get(k))) {
@@ -756,29 +728,21 @@ class PipelineFunction {
             }
         }
 
-        /**
-         * Determines whether to check against Github.
-         */
+         //Determines whether to check against Github.
         if (github == true) {
             deleteInt = checkGithub(deleteInt);
         }
 
-        /**
-         * Removes duplicates from deleteInt.
-         */
+         //Removes duplicates from deleteInt.
         deleteInt = new ArrayList<>(new HashSet<>(deleteInt));
 
-        /**
-         * Sorts deleteInt from largest to smallest (this comes in handy when
-         * implementing the upcoming for loop).
-         */
+         //Sorts deleteInt from largest to smallest (this comes in handy when
+         //implementing the upcoming for loop).
         Collections.sort(deleteInt, Collections.reverseOrder());
 
-        /**
-         * Deletes elements from seqList, residueList, pdbLinks, proteinLengths,
-         * and structureTypes based on integers stored in deleteInt (elements in
-         * the first five lists should all correspond based on index).
-         */
+         //Deletes elements from seqList, residueList, pdbLinks, proteinLengths,
+         //and structureTypes based on integers stored in deleteInt (elements in
+         // the first five lists should all correspond based on index).
         for (Integer deleteInt1 : deleteInt) {
             int delete = deleteInt1;
             seqList.remove(delete);
@@ -787,8 +751,93 @@ class PipelineFunction {
             proteinLengths.remove(delete);
             structureTypes.remove(delete);
         }
+    } */
 
-    }
+    /**
+     * Get modbase info is under development.
+     * @throws MalformedURLException
+     * @throws IOException
+     */
+    /*public void getModBaseInfo() {
+        if (pageSource.contains("modbase")) {
+
+            URL fixRedirect = new URL(pageSource);
+            String newUrl = null;
+
+            try {
+                HttpURLConnection conn = (HttpURLConnection) fixRedirect.openConnection();
+                conn.setReadTimeout(5000);
+                conn.addRequestProperty("Accept-Language", "en-US,en;q=0.8");
+                conn.addRequestProperty("User-Agent", "Mozilla");
+                conn.addRequestProperty("Referer", "google.com");
+
+                boolean redirect = false;
+
+                int status = conn.getResponseCode();
+                if (status != HttpURLConnection.HTTP_OK) {
+                    if (status == HttpURLConnection.HTTP_MOVED_TEMP || status == HttpURLConnection.HTTP_MOVED_PERM || status == HttpURLConnection.HTTP_SEE_OTHER) {
+                        redirect = true;
+                    }
+                }
+
+                if (redirect) {
+
+                    newUrl = conn.getHeaderField("Location");
+
+                    String cookies = conn.getHeaderField("Set-Cookie");
+
+                    conn = (HttpURLConnection) new URL(newUrl).openConnection();
+                    conn.setRequestProperty("Cookie", cookies);
+                    conn.addRequestProperty("Accept-Language", "en-US,en;q=0.8");
+                    conn.addRequestProperty("User-Agent", "Mozilla");
+                    conn.addRequestProperty("Referer", "google.com");
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+            pageSource = newUrl;
+            pdbLinks.add(pageSource);
+
+            URL pageObj = new URL(pageSource);
+
+            BufferedReader br4 = new BufferedReader(new InputStreamReader(pageObj.openStream()));
+
+             //Finds and stores the residue range and sequence identity from
+             //the ModBase website.
+            String line;
+            Double seqId = null;
+            String residueRange = null;
+            while ((line = br4.readLine()) != null) {
+                if (line.contains("Sequence Length</th> <td>")) {
+                    String[] firstSplit = line.split("Sequence Length</th> <td>");
+                    String secondHalf = firstSplit[1];
+                    String[] secondSplit = secondHalf.split("</td></tr></table>");
+                    String lengthString = secondSplit[0];
+                    proteinLengths.add(lengthString);
+                }
+                if (line.contains("Sequence Identity</th><td><font color=")) {
+                    String[] seqSplit = line.split("Sequence Identity</th><td><font color=");
+                    String firstSeq = seqSplit[1];
+                    String[] seqSplit2 = firstSeq.split("%</font>");
+                    String secondSeq = seqSplit2[0];
+                    String[] seqSplit3 = secondSeq.split(">");
+                    String seqString = seqSplit3[1];
+                    seqId = Double.parseDouble(seqString);
+                    seqList.add(seqId);
+                    structureTypes.add("");
+                }
+                if (line.contains("considered")) {
+                    String[] firstSplit = line.split("Target Region</th><td>");
+                    String secondHalf = firstSplit[1];
+                    String[] secondSplit = secondHalf.split(" </td></tr><tr><th><a");
+                    residueRange = secondSplit[0];
+                    residueList.add(residueRange);
+                }
+            }
+        }
+    } */
 
     /**
      * Downloads PDB files and organizes them into the appropriate directories.
@@ -816,6 +865,7 @@ class PipelineFunction {
             if (pdbLinks.get(i).contains("repository")) {
 
                 String url = "https://swissmodel.expasy.org" + pdbLinks.get(i);
+                System.out.println("URL IS: " + url);
                 /**
                  * The String "file" lists the directory the PDB file will be
                  * downloaded in, followed by the initial name of the file
@@ -1097,13 +1147,13 @@ public class RefinementPipeline {
             pipelineobj.github = checkGithub;
             pipelineobj.getGene(args[i]);
             pipelineobj.getIDP(args[i]);
-            pipelineobj.getNoProteinModelPortal(args[i]);
-            pipelineobj.getProteinModelLinks();
-            pipelineobj.buildLists();
-            if (pipelineobj.pdbLinks.isEmpty()) {
-                continue;
-            }
-            pipelineobj.downloadFiles();
+            pipelineobj.getDownloadLinks();
+            //pipelineobj.getProteinModelLinks();
+            pipelineobj.getSwissModelInfo();
+            //if (pipelineobj.pdbLinks.isEmpty()) {
+            //    continue;
+            //}
+            //pipelineobj.downloadFiles();
         }
         final long endTime = System.currentTimeMillis();
 
