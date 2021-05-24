@@ -208,7 +208,7 @@ class PipelineFunction {
      * @throws MalformedURLException
      * @throws IOException
      */
-     public void getDownloadLinks() throws MalformedURLException, IOException {
+     public void getWebsiteLinks() throws MalformedURLException, IOException {
 
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(uniprotObj.openStream()));
 
@@ -247,6 +247,79 @@ class PipelineFunction {
     }
 
     /**
+     *
+     * @throws MalformedURLException
+     * @throws IOException
+     */
+    public void getExperimentalStructureInfo(String geneName, String path) throws MalformedURLException, IOException {
+        if(swissModelLinks.isEmpty()) {
+            return;
+        }
+
+        /**
+         * Creates a directory with the gene name.
+         */
+        File geneNameFile = new File(geneName);
+        String pathToGeneDir = path + "/" + geneNameFile;
+        File geneDir = new File(pathToGeneDir);
+        geneDir.mkdir();
+
+        URL swissModelURL = new URL(swissModelLinks.get(0));
+        BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(swissModelURL.openStream()));
+
+        String line;
+        String pathToResidueDir = null;
+        String startRes = null;
+        String endRes = null;
+        String resolution = null;
+        while ((line = bufferedReader.readLine()) != null) {
+            if (line.contains(" aa;")) {
+                String[] split1 = line.split(" aa;");
+                String proteinLength = split1[0];
+                System.out.println("Protein Length: " + proteinLength);
+            }
+            //Gather information on experimental models.
+            if (line.contains(".pdb") && line.contains("href") && line.contains("rcsb.org")) {
+                String[] split1 = line.split(" href=\"");
+                String[] split2 = split1[1].split("\" target=");
+                String pdbLink = split2[0];
+                System.out.println("PDB LINK: " + pdbLink);
+                if (line.contains("Range: ")) {
+                    String[] newSplit1 = line.split("Range: ");
+                    String[] newSplit2 = newSplit1[1].split("\"></div></td>");
+                    String[] newSplit3 = newSplit2[0].split("-");
+                    startRes = newSplit3[0];
+                    endRes = newSplit3[1];
+                    int range = Integer.parseInt(endRes) - Integer.parseInt(startRes) + 1;
+                    System.out.println("Starting residue: " + startRes);
+                    System.out.println("Ending residue: " + endRes);
+                    System.out.println("Range is: " + range);
+                    File resRangeFile = new File(startRes + "-" + endRes);
+                    pathToResidueDir = pathToGeneDir + "/" + resRangeFile;
+                    File resDir = new File(pathToResidueDir);
+                    resDir.mkdir();
+                }
+
+                URL pdbURL = new URL(pdbLink);
+                BufferedReader bufferedReader2 = new BufferedReader(new InputStreamReader(pdbURL.openStream()));
+                String line2;
+                while ((line2 = bufferedReader2.readLine()) != null){
+                    if (line2.contains("panel panel-default") && line2.contains("Resolution:&nbsp</strong>")){
+                        String[] split3 = line2.split("Resolution:&nbsp</strong>");
+                        String[] split4 = split3[1].split(" Å</li><li");
+                        resolution = split4[0];
+                    }
+                }
+                bufferedReader2.close();
+
+                downloadExperimentalCoordinates(pdbLink, pathToResidueDir, geneName, startRes, endRes, resolution);
+            }
+        }
+        bufferedReader.close();
+    }
+
+
+    /**
      * For one gene, this method gets the total sequence length along with all models available in the Swiss Model
      * Repository and their model type (experimental, homology), their state (monomer, dimer, etc.), their isoform,
      * their sequence identity if from a homology model, model length, and residue range.
@@ -267,24 +340,6 @@ class PipelineFunction {
                 String[] split1 = line.split(" aa;");
                 String proteinLength = split1[0];
                 System.out.println("Protein Length: " + proteinLength);
-            }
-            //Gather information on experimental models.
-            if (line.contains(".pdb") && line.contains("href") && line.contains("rcsb.org")){
-                String[] split1 = line.split(" href=\"");
-                String[] split2 = split1[1].split("\" target=");
-                        String pdbLink = split2[0];
-                System.out.println("PDB LINK: " + pdbLink);
-                if (line.contains("Range: ")){
-                    String[] newSplit1 = line.split("Range: ");
-                    String[] newSplit2 = newSplit1[1].split("\"></div></td>");
-                    String[] newSplit3 = newSplit2[0].split("-");
-                    String startRes = newSplit3[0];
-                    String endRes = newSplit3[1];
-                    int range = Integer.parseInt(endRes) - Integer.parseInt(startRes) + 1;
-                    System.out.println("Starting residue: " + startRes);
-                    System.out.println("Ending residue: " + endRes);
-                    System.out.println("Range is: " + range);
-                }
             }
 
             //Gather information on homology models.
@@ -840,6 +895,36 @@ class PipelineFunction {
     } */
 
     /**
+     *
+     * @param url
+     * @throws IOException
+     */
+    public void downloadExperimentalCoordinates(String url, String path, String geneName, String startRes, String endRes, String resolution) throws IOException{
+
+        String file = path + "/" + geneName + "_" + startRes + "_" + endRes + "_" + resolution + ".pdb";
+
+        String downloadCoordinatesURL = "https://files.rcsb.org/download/";
+        String pdbForDownload = url.substring(url.length() - 4) + ".pdb";
+        String finalDownloadURL = downloadCoordinatesURL + pdbForDownload;
+        System.out.println("DOWNLOAD URL IS: " + finalDownloadURL);
+
+        try{
+            URL urlObj = new URL(finalDownloadURL);
+            BufferedInputStream bufferedIS = new BufferedInputStream(urlObj.openStream());
+            FileOutputStream fileOS = new FileOutputStream(file);
+
+            int data = bufferedIS.read();
+            while (data != -1) {
+                fileOS.write(data);
+                data = bufferedIS.read();
+            }
+        } catch (IOException exception){
+            System.out.println("WARNING: " + exception);
+        }
+    }
+
+
+    /**
      * Downloads PDB files and organizes them into the appropriate directories.
      *
      * @throws IOException
@@ -1142,14 +1227,23 @@ public class RefinementPipeline {
             }
         }
 
+        /**
+         * Creates a directory titled "pdbFiles".
+         */
+        File pdbName = new File("pdbFiles");
+        String path = pdbName.getCanonicalPath();
+        File pdbDir = new File(path);
+        pdbDir.mkdir();
+
         for (int i = counter; i < args.length; i++) {
             PipelineFunction pipelineobj = new PipelineFunction();
             pipelineobj.github = checkGithub;
-            pipelineobj.getGene(args[i]);
+            String geneName = pipelineobj.getGene(args[i]);
             pipelineobj.getIDP(args[i]);
-            pipelineobj.getDownloadLinks();
-            //pipelineobj.getProteinModelLinks();
+            pipelineobj.getWebsiteLinks();
+            pipelineobj.getExperimentalStructureInfo(geneName, path);
             pipelineobj.getSwissModelInfo();
+            //pipelineobj.getProteinModelLinks();
             //if (pipelineobj.pdbLinks.isEmpty()) {
             //    continue;
             //}
