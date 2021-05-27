@@ -247,7 +247,9 @@ class PipelineFunction {
     }
 
     /**
-     *
+     * Gathers information on RCSB experimental structures available for a gene. If multiple structures exist for the
+     * same residue range, this method will only call the downloadExperimentalCoordinates method on the best resolution
+     * structure available for a particular residue range.
      * @throws MalformedURLException
      * @throws IOException
      */
@@ -256,9 +258,7 @@ class PipelineFunction {
             return;
         }
 
-        /**
-         * Creates a directory with the gene name.
-         */
+        //Create a directory with the gene name.
         File geneNameFile = new File(geneName);
         String pathToGeneDir = path + "/" + geneNameFile;
         File geneDir = new File(pathToGeneDir);
@@ -276,7 +276,7 @@ class PipelineFunction {
             if (line.contains(" aa;")) {
                 String[] split1 = line.split(" aa;");
                 String proteinLength = split1[0];
-                System.out.println("Protein Length: " + proteinLength);
+                //System.out.println("Protein Length: " + proteinLength);
             }
             //Gather information on experimental models.
             if (line.contains(".pdb") && line.contains("href") && line.contains("rcsb.org")) {
@@ -284,6 +284,7 @@ class PipelineFunction {
                 String[] split2 = split1[1].split("\" target=");
                 String pdbLink = split2[0];
                 System.out.println("PDB LINK: " + pdbLink);
+                boolean resDirExists = false;
                 if (line.contains("Range: ")) {
                     String[] newSplit1 = line.split("Range: ");
                     String[] newSplit2 = newSplit1[1].split("\"></div></td>");
@@ -297,9 +298,16 @@ class PipelineFunction {
                     File resRangeFile = new File(startRes + "-" + endRes);
                     pathToResidueDir = pathToGeneDir + "/" + resRangeFile;
                     File resDir = new File(pathToResidueDir);
-                    resDir.mkdir();
+
+                    //Check to see if the residue range directory already exists. If so, set the boolean true.
+                    if(resDir.exists()) {
+                        resDirExists = true;
+                    } else {
+                        resDir.mkdir();
+                    }
                 }
 
+                //Get the resolution of the structure.
                 URL pdbURL = new URL(pdbLink);
                 BufferedReader bufferedReader2 = new BufferedReader(new InputStreamReader(pdbURL.openStream()));
                 String line2;
@@ -312,13 +320,29 @@ class PipelineFunction {
                 }
                 bufferedReader2.close();
 
-                downloadExperimentalCoordinates(pdbLink, pathToResidueDir, geneName, startRes, endRes, resolution);
+                //If the residue range directory already exists for an experimental structure, compare the resolution of
+                //the two structures available. Keep the structure that has the smaller resolution.
+                if(resDirExists){
+                    File folder = new File(pathToResidueDir);
+                    File[] listOfFiles = folder.listFiles();
+                    String fileName = listOfFiles[0].getName();
+                    String[] resolutionSplit1 = fileName.split("_");
+                    String[] resolutionSplit2 = resolutionSplit1[3].split(".pdb");
+                    String oldResolution = resolutionSplit2[0];
+                    if(Double.parseDouble(oldResolution) > Double.parseDouble(resolution)){
+                        for (File file : listOfFiles){
+                            file.delete();
+                        }
+                        downloadExperimentalCoordinates(pdbLink, pathToResidueDir, geneName, startRes, endRes, resolution);
+                    }
+                } else {
+                    downloadExperimentalCoordinates(pdbLink, pathToResidueDir, geneName, startRes, endRes, resolution);
+                }
             }
         }
         bufferedReader.close();
     }
-
-
+    
     /**
      * For one gene, this method gets the total sequence length along with all models available in the Swiss Model
      * Repository and their model type (experimental, homology), their state (monomer, dimer, etc.), their isoform,
@@ -339,7 +363,7 @@ class PipelineFunction {
             if (line.contains(" aa;")) {
                 String[] split1 = line.split(" aa;");
                 String proteinLength = split1[0];
-                System.out.println("Protein Length: " + proteinLength);
+                //System.out.println("Protein Length: " + proteinLength);
             }
 
             //Gather information on homology models.
@@ -895,7 +919,7 @@ class PipelineFunction {
     } */
 
     /**
-     *
+     * Downloads experimental structure files from RCSB.
      * @param url
      * @throws IOException
      */
