@@ -327,7 +327,7 @@ class PipelineFunction {
                     File[] listOfFiles = folder.listFiles();
                     String fileName = listOfFiles[0].getName();
                     String[] resolutionSplit1 = fileName.split("_");
-                    String[] resolutionSplit2 = resolutionSplit1[3].split(".pdb");
+                    String[] resolutionSplit2 = resolutionSplit1[2].split(".pdb");
                     String oldResolution = resolutionSplit2[0];
                     if(Double.parseDouble(oldResolution) > Double.parseDouble(resolution)){
                         for (File file : listOfFiles){
@@ -342,7 +342,7 @@ class PipelineFunction {
         }
         bufferedReader.close();
     }
-    
+
     /**
      * For one gene, this method gets the total sequence length along with all models available in the Swiss Model
      * Repository and their model type (experimental, homology), their state (monomer, dimer, etc.), their isoform,
@@ -350,33 +350,39 @@ class PipelineFunction {
      * @throws MalformedURLException
      * @throws IOException
      */
-    public void getSwissModelInfo() throws MalformedURLException, IOException {
+    public void getSwissModelInfo(String geneName, String path) throws MalformedURLException, IOException {
         if(swissModelLinks.isEmpty()) {
             return;
         }
-
+        File geneNameFile = new File(geneName);
+        String pathToGeneDir = path + "/" + geneNameFile;
+        File geneDir = new File(pathToGeneDir);
+        geneDir.mkdir();
         URL swissModelURL = new URL(swissModelLinks.get(0));
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(swissModelURL.openStream()));
-
         String line;
+        String seqid = null;
+        String startRes;
+        String endRes;
+        String pathToResidueDir = null;
+        String pdbLink = null;
         while ((line = bufferedReader.readLine()) != null){
             if (line.contains(" aa;")) {
                 String[] split1 = line.split(" aa;");
                 String proteinLength = split1[0];
                 //System.out.println("Protein Length: " + proteinLength);
             }
-
+            boolean resDirExists = false;
             //Gather information on homology models.
             if (line.contains(".pdb") && line.contains("href") && !line.contains("rcsb.org")){
                 String[] split1 = line.split(" href=\"");
                 String[] split2 = split1[1].split("\" target=");
-                String pdbLink = "https://swissmodel.expasy.org"+split2[0];
-                System.out.println("PDB LINK: " + pdbLink);
-
+                pdbLink = "https://swissmodel.expasy.org"+split2[0];
+                //System.out.println("PDB LINK: " + pdbLink);
                 String[] splitID = line.split("></div></td><td>");
                 String[] splitID2 = splitID[1].split("</td></tr><tr");
-                String seqid = splitID2[0];
-                System.out.println("Sequence Identity: " + seqid);
+                seqid = splitID2[0];
+                //System.out.println("Sequence Identity: " + seqid);
             }
             if (line.contains("menuitem")){
                 String[] split = line.split("Isoform ");
@@ -384,22 +390,64 @@ class PipelineFunction {
                 String isoformNum = split2[0];
                 //String[] split3 = split2[1].split("</td><td>");
                 //String structureType = split3[0];
-                System.out.println("Isoform Number: " + isoformNum);
+                //System.out.println("Isoform Number: " + isoformNum);
                 //System.out.println("Structure Type: " + structureType);
-
                 String[] newSplit1 = line.split("display:none\">");
                 String[] newSplit2 = newSplit1[1].split("-");
-                String startRes = newSplit2[0];
+                startRes = newSplit2[0];
                 String[] newSplit3 = newSplit2[1].split("</span><div");
-                String endRes = newSplit3[0];
+                endRes = newSplit3[0];
                 int range = Integer.parseInt(endRes) - Integer.parseInt(startRes) + 1;
-                System.out.println("Starting residue: " + startRes);
-                System.out.println("Ending residue: " + endRes);
-                System.out.println("Range is: " + range);
+                System.out.println("Residue Range: " + startRes + "-" + endRes);
+                //System.out.println("Ending residue: " + endRes);
+                //System.out.println("Range is: " + range);
+                File resRangeFile = new File(startRes + "-" + endRes);
+                pathToResidueDir = pathToGeneDir + "/" + resRangeFile;
+                File resDir = new File(pathToResidueDir);
+                if(resDir.exists()) {
+                    resDirExists = true;
+                } else {
+                    resDir.mkdir();
+                }
+                if(resDirExists){
+                    File folder = new File(pathToResidueDir);
+                    File[] listOfFiles = folder.listFiles();
+                    String fileName = listOfFiles[0].getName();
+                    String[] sequenceIDSplit1 = fileName.split("_");
+                    String[] sequenceIDSplit2 = sequenceIDSplit1[2].split(".pdb");
+                    String oldSequenceID = sequenceIDSplit2[0];
+                    if(Double.parseDouble(oldSequenceID) < Double.parseDouble(seqid)){
+                        for (File file : listOfFiles){
+                            file.delete();
+                        }
+                        downloadHomologyCoordinates(pdbLink, pathToResidueDir, geneName, startRes, endRes, seqid);
+                    }
+                } else {
+                    downloadHomologyCoordinates(pdbLink, pathToResidueDir, geneName, startRes, endRes, seqid);
+                }
             }
         }
-
         bufferedReader.close();
+    }
+
+    public void downloadHomologyCoordinates(String url, String path, String geneName, String startRes, String endRes, String resolution) throws IOException{
+        String file = path + "/" + geneName + "_" + startRes + "-" + endRes + "_" + resolution + ".pdb";
+        //String downloadCoordinatesURL = "https://files.rcsb.org/download/";
+        //String pdbForDownload = url.substring(url.length() - 4) + ".pdb";
+        String finalDownloadURL = url;
+        System.out.println("DOWNLOAD URL IS: " + finalDownloadURL);
+        try{
+            URL urlObj = new URL(finalDownloadURL);
+            BufferedInputStream bufferedIS = new BufferedInputStream(urlObj.openStream());
+            FileOutputStream fileOS = new FileOutputStream(file);
+            int data = bufferedIS.read();
+            while (data != -1) {
+                fileOS.write(data);
+                data = bufferedIS.read();
+            }
+        } catch (IOException exception){
+            System.out.println("WARNING: " + exception);
+        }
     }
 
     /**
@@ -925,7 +973,7 @@ class PipelineFunction {
      */
     public void downloadExperimentalCoordinates(String url, String path, String geneName, String startRes, String endRes, String resolution) throws IOException{
 
-        String file = path + "/" + geneName + "_" + startRes + "_" + endRes + "_" + resolution + ".pdb";
+        String file = path + "/" + geneName + "_" + startRes + "-" + endRes + "_" + resolution + ".pdb";
 
         String downloadCoordinatesURL = "https://files.rcsb.org/download/";
         String pdbForDownload = url.substring(url.length() - 4) + ".pdb";
@@ -1265,8 +1313,8 @@ public class RefinementPipeline {
             String geneName = pipelineobj.getGene(args[i]);
             pipelineobj.getIDP(args[i]);
             pipelineobj.getWebsiteLinks();
-            pipelineobj.getExperimentalStructureInfo(geneName, path);
-            pipelineobj.getSwissModelInfo();
+            //pipelineobj.getExperimentalStructureInfo(geneName, path);
+            pipelineobj.getSwissModelInfo(geneName, path);
             //pipelineobj.getProteinModelLinks();
             //if (pipelineobj.pdbLinks.isEmpty()) {
             //    continue;
